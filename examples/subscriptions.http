@@ -1,4 +1,6 @@
 
+# keys here are safe / dummy.
+
 post https://budgetstream.azurewebsites.net/api/Subscribe?
 
 code={{code}}
