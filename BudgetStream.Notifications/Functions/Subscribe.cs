@@ -21,7 +21,7 @@ namespace BudgetStream.Notifications.Functions
 
         [FunctionName(nameof(AddSubscriber))]
         public static async Task<IActionResult> AddSubscriber(
-            [HttpTrigger(AuthorizationLevel.Function, "post", Route = null)] HttpRequest req,
+            [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = null)] HttpRequest req,
             ILogger log)
         {
             string requestBody = await new StreamReader(req.Body).ReadToEndAsync();
@@ -29,6 +29,10 @@ namespace BudgetStream.Notifications.Functions
             var sub = MapFrom(rawBody);
 
             // todo: bail if sub aready exists.
+
+            // temp limiter for POC, eventually replace with db.
+            if (_subs.Count > 10)
+                throw new Exception("Subscriber queue is full.");
 
             _subs.Add(sub);
 
@@ -66,7 +70,8 @@ namespace BudgetStream.Notifications.Functions
                 Subject = subject
             };
 
-            await pushClient.SendNotificationAsync(_subs.FirstOrDefault(), message, keys);
+            _subs.ForEach(async sub => 
+                await pushClient.SendNotificationAsync(sub, message, keys));
 
             return new OkResult();
         }
