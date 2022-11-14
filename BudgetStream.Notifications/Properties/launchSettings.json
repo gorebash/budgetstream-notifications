@@ -1,8 +1,8 @@
 {
   "profiles": {
-    "BudgetStream.Services": {
+    "budgetstream-notifications": {
       "commandName": "Project",
-      "commandLineArgs": "--port 7131",
+      "commandLineArgs": "--port 7073",
       "launchBrowser": false
     }
   }

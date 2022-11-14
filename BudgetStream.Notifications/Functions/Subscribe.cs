@@ -6,10 +6,13 @@ using Microsoft.Azure.WebJobs;
 using Microsoft.Azure.WebJobs.Extensions.Http;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
-using Newtonsoft.Json;
 using System.Collections.Generic;
 using WebPush;
 using System.Linq;
+using BudgetStream.Notifications.Models;
+using System.Text.Json;
+using Newtonsoft.Json;
+using System.Transactions;
 
 namespace BudgetStream.Notifications.Functions
 {
@@ -25,7 +28,10 @@ namespace BudgetStream.Notifications.Functions
             ILogger log)
         {
             string requestBody = await new StreamReader(req.Body).ReadToEndAsync();
+
+            // todo: convert to JsonSerializer async.
             dynamic rawBody = JsonConvert.DeserializeObject(requestBody);
+
             var sub = MapFrom(rawBody);
 
             // todo: bail if sub aready exists.
@@ -40,16 +46,48 @@ namespace BudgetStream.Notifications.Functions
         }
 
 
-        [FunctionName(nameof(SendNotifications))]
-        public static async Task<IActionResult> SendNotifications(
+        /**
+         * Http trigger to manually invoke notifications.
+         * For testing only.
+         */
+        [FunctionName(nameof(TriggerNotifications))]
+        public static async Task<IActionResult> TriggerNotifications (
             [HttpTrigger(AuthorizationLevel.Function, "post", Route = null)] HttpRequest req,
             ILogger log)
         {
+            log.LogInformation($"{nameof(SendNotifications)} queue triggered with {_subs.Count} subscribers.");
+
+            var transaction = await new StreamReader(req.Body).ReadToEndAsync();
+            SendPushNotification(transaction);
+
+            return new OkResult();
+        }
+
+
+        [FunctionName(nameof(SendNotifications))] // rename to transactionAdded
+        public static void SendNotifications(
+            [QueueTrigger("transactions-queue", Connection = "TransactionsQueue.ConnectionString")] string transaction,
+            ILogger log)
+        {
+            log.LogInformation($"{nameof(SendNotifications)} queue triggered with {_subs.Count} subscribers.");
+
+            SendPushNotification(transaction);
+        }
+
+
+        private static PushSubscription MapFrom(dynamic postBody) =>
+            new PushSubscription
+            {
+                Endpoint = postBody.endpoint,
+                Auth = postBody.keys.auth,
+                P256DH = postBody.keys.p256dh
+            };
+
+
+        private static void SendPushNotification (string transaction)
+        {
             // todo: move to injected
             var pushClient = new WebPushClient();
-
-            // todo: only needed for e2e testing.
-            var message = await new StreamReader(req.Body).ReadToEndAsync();
 
             var privateKey = Environment.GetEnvironmentVariable("VAPID_PRIVATE_KEY");
             if (string.IsNullOrEmpty(privateKey))
@@ -70,19 +108,22 @@ namespace BudgetStream.Notifications.Functions
                 Subject = subject
             };
 
-            _subs.ForEach(async sub => 
-                await pushClient.SendNotificationAsync(sub, message, keys));
-
-            return new OkResult();
-        }
-
-
-        private static PushSubscription MapFrom(dynamic postBody) =>
-            new PushSubscription
+            /* todo: shape notification data using service worker sdk:
             {
-                Endpoint = postBody.endpoint,
-                Auth = postBody.keys.auth,
-                P256DH = postBody.keys.p256dh
-            };
+                "notification": {
+                    "title": "New transcation..",
+                    "data": {
+                        "onActionClick": {
+                            "default": {"operation": "focusLastFocusedOrOpen"}
+                        }
+                    }
+                }
+            }
+            */
+
+
+            _subs.ForEach(async sub =>
+                await pushClient.SendNotificationAsync(sub, transaction, keys));
+        }
     }
 }
